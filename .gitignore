@@ -1,0 +1,8 @@
+sqliteDB/
+cert/
+csv/
+Sep2023/
+.vscode/
+__pycache__/
+trs/
+start.sh
