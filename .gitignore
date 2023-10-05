@@ -6,3 +6,4 @@ Sep2023/
 __pycache__/
 trs/
 start.sh
+config.json

@@ -5,7 +5,6 @@ https://github.com/binh-bk/Sensirion_SPS30
 """
 import serial, struct, time
 import subprocess
-from operator import invert
 import os
 import json
 import csv
@@ -16,17 +15,21 @@ import ssl
 # set localtime
 os.environ["TZ"] = "Asia/Seoul"
 time.tzset()
-SPS_PORT = "/dev/ttyS0"
-ARDUINO_PORT = "/dev/ttyACM0"
+
+with open("./config.json") as f:
+    config = json.load(f)
+
+SPS_PORT = config["SPS_PORT"]
+ARDUINO_PORT = config["ARDUINO_PORT"]
 
 # MQTT host, users
-ENDPOINT = "a33hnbvehzvvml-ats.iot.ap-northeast-2.amazonaws.com"
-THING_NAME = "basicPubSub"
-CERTPATH = "./cert/rpi_4_01.cert.pem"  # cert파일 경로
-KEYPATH = "./cert/rpi_4_01.private.key"  # key 파일 경로
-CAROOTPATH = "./cert/root-CA.crt"  # RootCaPem 파일 경로
-TOPIC = "sdk/test/python"  # 주제
-TOPIC_ALIAS_MAX = 60
+ENDPOINT = config["ENDPOINT"]
+THING_NAME = config["THING_NAME"]
+CERTPATH = config["CERTPATH"]  # cert파일 경로
+KEYPATH = config["KEYPATH"]  # key 파일 경로
+CAROOTPATH = config["CAROOTPATH"]  # RootCaPem 파일 경로
+TOPIC = config["TOPIC"]  # 주제
+TOPIC_ALIAS_MAX = config["TOPIC_ALIAS_MAX"]
 
 
 class SPS30GRABBER:
@@ -95,11 +98,11 @@ class SPS30GRABBER:
         self.mqttClient = self.initMqtt()
 
     def on_connect(self, mqttc, userdata, flags, rc, properties=None):
-        print("hello, world! mqtt is connected!")
+        # print("hello, world! mqtt is connected!")
         mqttc.is_connected = True
 
     def initMqtt(self):
-        mqtt_client = mqtt.Client(client_id=THING_NAME)
+        mqtt_client = mqtt.Client(client_id=THING_NAME, protocol=5)
         mqtt_client.on_connect = self.on_connect
         mqtt_client.tls_set(
             CAROOTPATH,
@@ -146,7 +149,7 @@ class SPS30GRABBER:
 
     def record_data(self):
         data = self.dataDict
-        print("record data: ", data)
+        # print("record data: ", data)
         # id_ = data.split(",")[0]
         # id_ = f"{id_}"
         id_ = self.name
@@ -154,18 +157,20 @@ class SPS30GRABBER:
         with open(filename, "a+") as f:
             w = csv.writer(f)
             w.writerow(data.values())
-            print(data)
+            # print(data)
         return None
 
     def __str__(self):
         return f"{self.port}, {self.name}, {self.fanOn}, {self.lastSample}"
 
-    def push_mqtt_server(self):
+    def push_mqtt_server(self, pk_id):
         data = self.dataDict
+        data["pk_id"] = pk_id
         print(f"Process for MQTT {data}")
         payload = data
-        print(f"MQTT: {payload}")
+        # print(f"MQTT: {payload}")
         payload = json.dumps(payload)
+        del data["pk_id"]
         if self.mqttClient.is_connected:
             try:
                 self.mqttClient.publish(TOPIC, payload)
@@ -181,7 +186,7 @@ class SPS30GRABBER:
         self.ser.write(self.stopByte)
 
     def read_arduino_values(self):
-        print("hyello! arduino!")
+        # print("hyello! arduino!")
         self.arduinoSer.flushInput()
         dataList = []
         if self.arduinoSer.readable():
@@ -256,7 +261,7 @@ class SPS30GRABBER:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS 
-            sps30(id INTEGER PRIMARY KEY AUTOINCREMENT,
+            iot_data(id INTEGER PRIMARY KEY AUTOINCREMENT,
             device_id STRING,
             pm1_0 REAL, 
             pm2_5 REAL, 
@@ -277,7 +282,7 @@ class SPS30GRABBER:
         conn.commit()
         conn.execute(
             """INSERT INTO 
-            sps30 
+            iot_data 
             (datetime,
             device_id,
             pm1_0,
@@ -298,6 +303,20 @@ class SPS30GRABBER:
         )
         conn.commit()
         conn.close()
+
+    def get_id_from_sqlite_db(self):
+        device_id = self.dataDict["device_id"]
+        datetime = self.dataDict["datetime"]
+        conn = sqlite3.connect("./sqliteDB/sps30.db")
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM iot_data WHERE device_id=? AND datetime=?",
+            (device_id, datetime),
+        )
+        rows = cur.fetchall()
+        print("rows :", rows)
+        conn.close()
+        return rows[0][0]
 
     def updateSps30Data(self, data):
         dataList = list(data)
@@ -330,12 +349,8 @@ class SPS30GRABBER:
                 self.updateSps30Data(output)
                 self.updateArduinoData(data)
                 print("dataDict: ", self.dataDict)
-                # sensorData = ""
-                # for val in output:
-                #     sensorData += "{0:.2f},".format(val)
-
-                # output = ",".join([self.name, self.datetime_(), sensorData[:-1]])
                 self.save_data_to_sqlite()
+                pk_id = self.get_id_from_sqlite_db()
                 self.lastSample = self.time_()
                 if self.is_started:
                     self.stop()
@@ -343,7 +358,7 @@ class SPS30GRABBER:
                 if self.save_data:
                     self.record_data()
                 if self.push_mqtt:
-                    self.push_mqtt_server()
+                    self.push_mqtt_server(pk_id)
             else:
                 time.sleep(1)
         return None
@@ -359,7 +374,7 @@ if __name__ == "__main__":
         spsPort=SPS_PORT,
         arduinoPort=ARDUINO_PORT,
         push_mqtt=True,
-        INTERVAL=36,
+        INTERVAL=37,
     )
     while True:
         sps30Grabber.run_query()
