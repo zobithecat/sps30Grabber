@@ -11,6 +11,8 @@ import csv
 import paho.mqtt.client as mqtt
 import sqlite3
 import ssl
+import socket
+import public_ip as ip
 
 # set localtime
 os.environ["TZ"] = "Asia/Seoul"
@@ -30,6 +32,7 @@ KEYPATH = config["KEYPATH"]  # key 파일 경로
 CAROOTPATH = config["CAROOTPATH"]  # RootCaPem 파일 경로
 TOPIC = config["TOPIC"]  # 주제
 TOPIC_ALIAS_MAX = config["TOPIC_ALIAS_MAX"]
+DEVICE_ID = config["DEVICE_ID"]
 
 
 class SPS30GRABBER:
@@ -45,6 +48,8 @@ class SPS30GRABBER:
         push_mqtt=False,
         INTERVAL=60,
     ):
+        self.externalIp = ""
+        self.internalIp = ""
         self.deviceId = deviceId
         self.spsPort = spsPort
         self.arduinoPort = arduinoPort
@@ -168,9 +173,13 @@ class SPS30GRABBER:
         data["pk_id"] = pk_id
         print(f"Process for MQTT {data}")
         payload = data
+        payload["internal_ip"] = self.internalIp
+        payload["external_ip"] = self.externalIp
         # print(f"MQTT: {payload}")
         payload = json.dumps(payload)
         del data["pk_id"]
+        del data["internal_ip"]
+        del data["external_ip"]
         if self.mqttClient.is_connected:
             try:
                 self.mqttClient.publish(TOPIC, payload)
@@ -333,6 +342,10 @@ class SPS30GRABBER:
             if value[:1] == "H":
                 self.dataDict["humidity"] = float(value[1:])
 
+    def updateIpInfo(self):
+        self.externalIp = self.get_external_ip()
+        self.internalIp = self.get_internal_ip()
+
     def run_query(self):
         if self.time_() - self.lastSample >= self.interval:
             if not self.is_started:
@@ -348,6 +361,7 @@ class SPS30GRABBER:
                 data = self.read_arduino_values()
                 self.updateSps30Data(output)
                 self.updateArduinoData(data)
+                self.updateIpInfo()
                 print("dataDict: ", self.dataDict)
                 self.save_data_to_sqlite()
                 pk_id = self.get_id_from_sqlite_db()
@@ -358,6 +372,8 @@ class SPS30GRABBER:
                 if self.save_data:
                     self.record_data()
                 if self.push_mqtt:
+                    print("internal ip address is: ", self.internalIp)
+                    print("external ip address is: ", self.externalIp)
                     self.push_mqtt_server(pk_id)
             else:
                 time.sleep(1)
@@ -367,10 +383,26 @@ class SPS30GRABBER:
         self.ser.close()
         self.arduinoSer.close()
 
+    def get_internal_ip(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0)
+        try:
+            # doesn't even have to be reachable
+            s.connect(("10.254.254.254", 1))
+            IP = s.getsockname()[0]
+        except Exception:
+            IP = "127.0.0.1"
+        finally:
+            s.close()
+        return IP
+
+    def get_external_ip(self):
+        return ip.get()
+
 
 if __name__ == "__main__":
     sps30Grabber = SPS30GRABBER(
-        deviceId="scilab-01",
+        deviceId=DEVICE_ID,
         spsPort=SPS_PORT,
         arduinoPort=ARDUINO_PORT,
         push_mqtt=True,
