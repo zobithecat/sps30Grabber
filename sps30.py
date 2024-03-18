@@ -37,7 +37,7 @@ DEVICE_ID = config["DEVICE_ID"]
 
 class SPS30GRABBER:
     NAME = "SPS30"
-    WARMUP = 20  # seconds
+    WARMUP = 10  # seconds
 
     def __init__(
         self,
@@ -61,6 +61,7 @@ class SPS30GRABBER:
         self.lastSample = 0
         self.fanOn = 0
         self.is_started = False
+        self.run_count = 0
         self.ser = serial.Serial(
             self.spsPort, baudrate=115200, stopbits=1, parity="N", timeout=2
         )
@@ -347,7 +348,7 @@ class SPS30GRABBER:
         self.internalIp = self.get_internal_ip()
 
     def run_query(self):
-        if self.time_() - self.lastSample >= self.interval:
+        if self.time_() - self.lastSample >= self.interval and self.run_count != 1:
             if not self.is_started:
                 self.start()
                 self.fanOn = self.time_()
@@ -375,8 +376,9 @@ class SPS30GRABBER:
                     print("internal ip address is: ", self.internalIp)
                     print("external ip address is: ", self.externalIp)
                     self.push_mqtt_server(pk_id)
-            else:
-                time.sleep(1)
+                    self.run_count = 1
+                else:
+                    time.sleep(1)
         return None
 
     def close_port(self):
@@ -406,7 +408,7 @@ if __name__ == "__main__":
         spsPort=SPS_PORT,
         arduinoPort=ARDUINO_PORT,
         push_mqtt=True,
-        INTERVAL=37,
+        INTERVAL=0,
     )
-    while True:
+    while sps30Grabber.run_count != 1:
         sps30Grabber.run_query()
