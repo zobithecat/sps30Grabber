@@ -13,6 +13,8 @@ import sqlite3
 import ssl
 import socket
 import public_ip as ip
+import requests
+import re
 
 # set localtime
 os.environ["TZ"] = "Asia/Seoul"
@@ -176,14 +178,15 @@ class SPS30GRABBER:
         payload = data
         payload["internal_ip"] = self.internalIp
         payload["external_ip"] = self.externalIp
-        # print(f"MQTT: {payload}")
+        print(f"MQTT: {payload}")
         payload = json.dumps(payload)
         del data["pk_id"]
         del data["internal_ip"]
         del data["external_ip"]
         if self.mqttClient.is_connected:
             try:
-                self.mqttClient.publish(TOPIC, payload)
+                result = self.mqttClient.publish(TOPIC, payload)
+                print("result :", result)
             except Exception as e:
                 print("Error: {}".format(e))
                 pass
@@ -344,7 +347,7 @@ class SPS30GRABBER:
                 self.dataDict["humidity"] = float(value[1:])
 
     def updateIpInfo(self):
-        self.externalIp = self.get_external_ip()
+        self.externalIp = self.get_external_ip_by_re()
         self.internalIp = self.get_internal_ip()
 
     def run_query(self):
@@ -384,6 +387,10 @@ class SPS30GRABBER:
     def close_port(self):
         self.ser.close()
         self.arduinoSer.close()
+    
+    def get_external_ip_by_re(self):
+        req = requests.get("http://ipconfig.kr")
+        return re.search(r'IP Address : (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', req.text)[1]
 
     def get_internal_ip(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -400,7 +407,7 @@ class SPS30GRABBER:
 
     def get_external_ip(self):
         return ip.get()
-
+    
 
 if __name__ == "__main__":
     sps30Grabber = SPS30GRABBER(
